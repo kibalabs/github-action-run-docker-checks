@@ -1,0 +1,28 @@
+name: 'Run Docker Checks'
+description: 'Run checks in parallel docker containers and report each one as its own GitHub check'
+branding:
+  icon: 'check-square'
+  color: 'blue'
+author: 'Kiba Labs'
+inputs:
+  image:
+    description: 'Docker image to run every check in'
+    required: true
+  checks:
+    description: 'YAML list of checks. Each has a name and a command, and optionally check-name, annotations-file and stdout-file.'
+    required: true
+  annotations-path-prefix:
+    description: 'Prefix added to the paths in every annotations file, e.g. ./api/ when the image is built from that folder'
+    required: false
+    default: ''
+  github-token:
+    description: 'Token used to create the checks. Needs checks: write.'
+    required: false
+    default: ${{ github.token }}
+outputs:
+  failed-checks:
+    description: 'Comma-separated names of the checks that failed'
+runs:
+  using: 'node24'
+  main: 'runnable/index.js'
+  post: 'runnable/index.js'
