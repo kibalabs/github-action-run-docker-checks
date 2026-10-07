@@ -61,7 +61,7 @@ export const getImageWorkingDirectory = async (image: string): Promise<string> =
 };
 
 export const startContainer = async (containerName: string, image: string, command: string): Promise<void> => {
-  await runDockerOrThrow(['run', '--detach', '--name', containerName, image, 'sh', '-c', command]);
+  await runDockerOrThrow(['run', '--detach', '--name', containerName, '--entrypoint', 'sh', image, '-c', command]);
 };
 
 export const waitForContainer = async (containerName: string): Promise<number> => {

@@ -1,6 +1,6 @@
 {
   "name": "@kibalabs/github-action-run-docker-checks",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "GitHub Action to run checks in parallel docker containers and report each as its own GitHub check",
   "license": "MIT",
   "private": true,
