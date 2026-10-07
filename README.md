@@ -43,7 +43,7 @@ The step fails when any check fails. Every check's full log is printed in its ow
 | Field | Required | Description |
 | --- | --- | --- |
 | `name` | yes | Short unique name, used for the container and the log group. |
-| `command` | yes | Run with `sh -c` in the image, in the image's working directory. Quote it if it contains `: `. |
+| `command` | yes | Run with `sh -c` in the image, ignoring the image's `ENTRYPOINT`, in the image's working directory. Quote it if it contains `: `. |
 | `check-name` | no | Report this check as its own GitHub check with this name. |
 | `annotations-file` | no | JSON file the command writes inside the container, in the [create-annotations](https://github.com/kibalabs/github-action-create-annotations) format, attached to the check. Needs `check-name`. Relative paths start from the image's working directory. |
 | `stdout-file` | no | Save the command's standard output to this file in the workspace, e.g. to compare generated files afterwards. |
@@ -69,10 +69,10 @@ A check passes when its command exits with 0. Annotations are added to the check
 
 When [Skip If Passed](https://github.com/kibalabs/github-action-skip-if-passed) decides a job can be skipped, it sets `CHECKS_ALREADY_PASSED=true` and this action does nothing. Its checks set `external_id` to the workflow run's id, so Skip If Passed copies them onto the skipped commit.
 
-If the job is cancelled or times out, a post step marks any checks that didn't finish as cancelled.
+If the job is cancelled or times out, a post step marks any checks that didn't finish as cancelled and force-removes their containers.
 
 ## Development
 
 Build with `make build`, which bundles `src/` into `runnable/index.js`. GitHub runs that file directly, so commit it with every source change. Run the tests with `make test`.
 
-To release, push a `vX.Y.Z` tag. The release workflow publishes the release and moves the `vX` tag to it, so `@v1` always points at the latest 1.x release.
+To release, bump `version` in `package.json` in a PR, then run the Release workflow on `main` (Actions → Release → Run workflow). It tags `vX.Y.Z`, publishes the release and moves the `vX` tag to it, so `@v1` always points at the latest 1.x release. Versions with a pre-release suffix (e.g. `1.1.0-rc1`) are published as pre-releases and don't move `vX`. Only the release workflow can push version tags.

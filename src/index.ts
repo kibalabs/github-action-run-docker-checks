@@ -12,6 +12,7 @@ import { ChecksPermissionError, completeCheck, createInProgressCheck, ICheckTarg
 import { IAnnotation, ICheckDefinition, ICheckResult, SKIP_ENVIRONMENT_VARIABLE } from './model';
 
 const CHECK_RUN_IDS_STATE = 'checkRunIds';
+const CONTAINER_NAMES_STATE = 'containerNames';
 
 const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -42,8 +43,7 @@ const readAnnotations = async (containerName: string, definition: ICheckDefiniti
   }
 };
 
-const runCheck = async (definition: ICheckDefinition, image: string, workingDirectory: string, pathPrefix: string, tempDirectory: string): Promise<ICheckResult> => {
-  const containerName = `${definition.name.replace(/[^a-zA-Z0-9_.-]/g, '-')}-${randomUUID().slice(0, 8)}`;
+const runCheck = async (containerName: string, definition: ICheckDefinition, image: string, workingDirectory: string, pathPrefix: string, tempDirectory: string): Promise<ICheckResult> => {
   const logPath = path.join(tempDirectory, `${containerName}.log`);
   const startTime = Date.now();
   let exitCode: number | null = null;
@@ -83,6 +83,8 @@ const createChecks = async (octokit: Octokit, target: ICheckTarget, definitions:
     }
     try {
       checkRunIds.set(definition.name, await createInProgressCheck(octokit, target, definition.checkName));
+      // NOTE(krishan711): saved after every creation so the post step can cancel the created checks even if a later creation fails
+      saveState(CHECK_RUN_IDS_STATE, JSON.stringify([...checkRunIds.values()]));
     } catch (error) {
       if (!(error instanceof ChecksPermissionError)) {
         throw error;
@@ -115,10 +117,11 @@ const runChecks = async (): Promise<void> => {
   const workingDirectory = await getImageWorkingDirectory(image);
   const tempDirectory = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'docker-checks-'));
   const checkRunIds = await createChecks(octokit, target, definitions);
-  saveState(CHECK_RUN_IDS_STATE, JSON.stringify([...checkRunIds.values()]));
+  const containerNames = definitions.map((definition: ICheckDefinition): string => `${definition.name.replace(/[^a-zA-Z0-9_.-]/g, '-')}-${randomUUID().slice(0, 8)}`);
+  saveState(CONTAINER_NAMES_STATE, JSON.stringify(containerNames));
   logInfo(`Running ${definitions.length} checks in ${image}: ${definitions.map((definition: ICheckDefinition): string => definition.name).join(', ')}`);
-  const results = await Promise.all(definitions.map(async (definition: ICheckDefinition): Promise<ICheckResult> => {
-    const result = await runCheck(definition, image, workingDirectory, pathPrefix, tempDirectory);
+  const results = await Promise.all(definitions.map(async (definition: ICheckDefinition, index: number): Promise<ICheckResult> => {
+    const result = await runCheck(containerNames[index], definition, image, workingDirectory, pathPrefix, tempDirectory);
     logInfo(`${result.isSuccess ? 'Passed' : 'Failed'}: ${definition.name} in ${result.durationSeconds}s`);
     const checkRunId = checkRunIds.get(definition.name);
     if (checkRunId) {
@@ -139,8 +142,10 @@ const runChecks = async (): Promise<void> => {
   }
 };
 
-// NOTE(krishan711): runs after the job even when it is cancelled or times out, so the checks this action created don't stay in progress forever
+// NOTE(krishan711): runs after the job even when cancelled or timed out, cleaning up checks and their containers
 const cancelUnfinishedChecks = async (): Promise<void> => {
+  const containerNames = JSON.parse(getState(CONTAINER_NAMES_STATE) || '[]') as string[];
+  await Promise.all(containerNames.map((containerName: string): Promise<void> => removeContainer(containerName)));
   const checkRunIds = JSON.parse(getState(CHECK_RUN_IDS_STATE) || '[]') as number[];
   if (checkRunIds.length === 0) {
     return;
@@ -162,7 +167,7 @@ const run = async (): Promise<void> => {
     await (isPost ? cancelUnfinishedChecks() : runChecks());
   } catch (error) {
     if (isPost) {
-      warning(`Could not cancel unfinished checks: ${getErrorMessage(error)}`);
+      warning(`Could not clean up unfinished checks or containers: ${getErrorMessage(error)}`);
     } else {
       setFailed(getErrorMessage(error));
     }
