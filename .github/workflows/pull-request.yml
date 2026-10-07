@@ -1,0 +1,73 @@
+name: Build
+on:
+  pull_request:
+    branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-pull-request
+  cancel-in-progress: true
+jobs:
+  build-package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    env:
+      DOCKER_IMAGE: github-action-run-docker-checks-build
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v7
+      - name: Build docker image
+        run: docker build --tag $DOCKER_IMAGE .
+      - name: Check the runnable is up to date
+        run: |
+          docker create --name container $DOCKER_IMAGE
+          docker cp container:/app/runnable/index.js ./runnable.js
+          cmp ./runnable/index.js ./runnable.js
+      - name: Run tests
+        run: docker run --rm $DOCKER_IMAGE make test
+      - name: Run lint-check
+        run: |
+          docker run --name lint-check $DOCKER_IMAGE make lint-check-ci
+          docker cp lint-check:/app/lint-check-results.json ./lint-check-results.json
+      - name: Upload lint results
+        uses: kibalabs/github-action-create-annotations@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          json-file-path: ./lint-check-results.json
+          check-name: lint-check
+          fail-on-error: false
+      - name: Run type-check
+        run: |
+          docker run --name type-check $DOCKER_IMAGE make type-check-ci
+          docker cp type-check:/app/type-check-results.json ./type-check-results.json
+      - name: Upload type-check results
+        uses: kibalabs/github-action-create-annotations@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          json-file-path: ./type-check-results.json
+          check-name: type-check
+          fail-on-error: false
+  run-action:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+      - id: checks
+        uses: ./
+        with:
+          image: alpine:3
+          checks: |
+            - name: greeting
+              command: echo hello
+              check-name: example-greeting
+            - name: annotations
+              command: 'printf %s "[{\"path\":\"README.md\",\"start_line\":1,\"end_line\":1,\"message\":\"An example notice\",\"annotation_level\":\"notice\"}]" > /tmp/results.json'
+              check-name: example-annotations
+              annotations-file: /tmp/results.json
+            - name: output
+              command: echo saved
+              stdout-file: output.txt
+      - name: Check the stdout file
+        run: test "$(cat output.txt)" = saved
