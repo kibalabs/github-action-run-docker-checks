@@ -11,10 +11,15 @@ import { copyFromContainer, getImageWorkingDirectory, removeContainer, startCont
 import { ChecksPermissionError, completeCheck, createInProgressCheck, ICheckTarget, Octokit } from './github-checks';
 import { IAnnotation, ICheckDefinition, ICheckResult, SKIP_ENVIRONMENT_VARIABLE } from './model';
 
-const CHECK_RUN_IDS_STATE = 'checkRunIds';
+const UNFINISHED_CHECK_RUN_IDS_STATE = 'unfinishedCheckRunIds';
 const CONTAINER_NAMES_STATE = 'containerNames';
 
 const getErrorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+// NOTE(krishan711): the post step cancels exactly these, instead of asking GitHub which checks are unfinished: a check completed moments before can still read as in progress and would be overwritten with cancelled
+const saveUnfinishedCheckRunIds = (checkRunIds: Map<string, number>, finishedNames: Set<string>): void => {
+  saveState(UNFINISHED_CHECK_RUN_IDS_STATE, JSON.stringify([...checkRunIds].filter(([name]): boolean => !finishedNames.has(name)).map(([, checkRunId]): number => checkRunId)));
+};
 
 const buildCheckTarget = (): ICheckTarget => {
   const { owner, repo } = githubContext.repo;
@@ -84,7 +89,7 @@ const createChecks = async (octokit: Octokit, target: ICheckTarget, definitions:
     try {
       checkRunIds.set(definition.name, await createInProgressCheck(octokit, target, definition.checkName));
       // NOTE(krishan711): saved after every creation so the post step can cancel the created checks even if a later creation fails
-      saveState(CHECK_RUN_IDS_STATE, JSON.stringify([...checkRunIds.values()]));
+      saveUnfinishedCheckRunIds(checkRunIds, new Set());
     } catch (error) {
       if (!(error instanceof ChecksPermissionError)) {
         throw error;
@@ -117,6 +122,7 @@ const runChecks = async (): Promise<void> => {
   const workingDirectory = await getImageWorkingDirectory(image);
   const tempDirectory = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'docker-checks-'));
   const checkRunIds = await createChecks(octokit, target, definitions);
+  const finishedNames = new Set<string>();
   const containerNames = definitions.map((definition: ICheckDefinition): string => `${definition.name.replace(/[^a-zA-Z0-9_.-]/g, '-')}-${randomUUID().slice(0, 8)}`);
   saveState(CONTAINER_NAMES_STATE, JSON.stringify(containerNames));
   logInfo(`Running ${definitions.length} checks in ${image}: ${definitions.map((definition: ICheckDefinition): string => definition.name).join(', ')}`);
@@ -125,7 +131,10 @@ const runChecks = async (): Promise<void> => {
     logInfo(`${result.isSuccess ? 'Passed' : 'Failed'}: ${definition.name} in ${result.durationSeconds}s`);
     const checkRunId = checkRunIds.get(definition.name);
     if (checkRunId) {
-      await completeCheck(octokit, target, checkRunId, result).catch((error: unknown): void => warning(`${definition.name}: could not report the check: ${getErrorMessage(error)}`));
+      await completeCheck(octokit, target, checkRunId, result, (): void => {
+        finishedNames.add(definition.name);
+        saveUnfinishedCheckRunIds(checkRunIds, finishedNames);
+      }).catch((error: unknown): void => warning(`${definition.name}: could not report the check: ${getErrorMessage(error)}`));
     }
     return result;
   }));
@@ -146,18 +155,13 @@ const runChecks = async (): Promise<void> => {
 const cancelUnfinishedChecks = async (): Promise<void> => {
   const containerNames = JSON.parse(getState(CONTAINER_NAMES_STATE) || '[]') as string[];
   await Promise.all(containerNames.map((containerName: string): Promise<void> => removeContainer(containerName)));
-  const checkRunIds = JSON.parse(getState(CHECK_RUN_IDS_STATE) || '[]') as number[];
+  const checkRunIds = JSON.parse(getState(UNFINISHED_CHECK_RUN_IDS_STATE) || '[]') as number[];
   if (checkRunIds.length === 0) {
     return;
   }
   const octokit = getOctokit(getInput('github-token', { required: true }));
   const target = buildCheckTarget();
-  await Promise.all(checkRunIds.map(async (checkRunId: number): Promise<void> => {
-    const checkRun = await octokit.rest.checks.get({ owner: target.owner, repo: target.repo, check_run_id: checkRunId });
-    if (checkRun.data.status !== 'completed') {
-      await octokit.rest.checks.update({ owner: target.owner, repo: target.repo, check_run_id: checkRunId, status: 'completed', conclusion: 'cancelled' });
-    }
-  }));
+  await Promise.all(checkRunIds.map((checkRunId: number): Promise<unknown> => octokit.rest.checks.update({ owner: target.owner, repo: target.repo, check_run_id: checkRunId, status: 'completed', conclusion: 'cancelled' })));
 };
 
 const run = async (): Promise<void> => {
