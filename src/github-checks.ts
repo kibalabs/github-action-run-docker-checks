@@ -80,7 +80,7 @@ const updateCheckWithRetries = async (octokit: Octokit, target: ICheckTarget, ch
   }
 };
 
-export const completeCheck = async (octokit: Octokit, target: ICheckTarget, checkRunId: number, result: ICheckResult): Promise<void> => {
+export const completeCheck = async (octokit: Octokit, target: ICheckTarget, checkRunId: number, result: ICheckResult, onConcluded: () => void): Promise<void> => {
   const output = buildCheckOutput(result);
   const annotationBatches: IAnnotation[][] = [];
   for (let index = 0; index < result.annotations.length; index += MAX_ANNOTATIONS_PER_REQUEST) {
@@ -92,6 +92,7 @@ export const completeCheck = async (octokit: Octokit, target: ICheckTarget, chec
     conclusion: result.isSuccess ? 'success' : 'failure',
     output: { ...output, annotations: firstAnnotations },
   }, UPDATE_RETRY_DELAYS_MS);
+  onConcluded();
   // NOTE(krishan711): each update appends its annotations to the check, so batches go one after another
   await remainingAnnotationBatches.reduce(async (previousUpdate: Promise<void>, batchAnnotations: IAnnotation[]): Promise<void> => {
     await previousUpdate;
