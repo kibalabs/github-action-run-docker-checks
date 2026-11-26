@@ -48,7 +48,7 @@ The step fails when any check fails. Every check's full log is printed in its ow
 | `annotations-file` | no | JSON file the command writes inside the container, in the [create-annotations](https://github.com/kibalabs/github-action-create-annotations) format, attached to the check. Needs `check-name`. Relative paths start from the image's working directory. |
 | `stdout-file` | no | Save the command's standard output to this file in the workspace, e.g. to compare generated files afterwards. |
 
-A check passes when its command exits with 0. Annotations are added to the check but don't change its result.
+A check passes when its command exits with 0 and its annotations file has no `failure` annotations, so checkers that write annotations and exit with 0 still fail the check. Warnings and notices don't change its result.
 
 ## Inputs
 
