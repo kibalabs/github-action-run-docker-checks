@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildCheckOutput } from '../src/github-checks';
+import { buildCheckOutput, hasFailureAnnotations } from '../src/github-checks';
 import { IAnnotation, ICheckResult } from '../src/model';
 
 const buildResult = (overrides: Partial<ICheckResult> = {}): ICheckResult => ({
@@ -30,6 +30,12 @@ describe('buildCheckOutput', () => {
     expect(buildCheckOutput(buildResult({ isSuccess: false, exitCode: null })).title).toBe('Failed in 12s');
   });
 
+  it('describes a check that failed through its annotations without an exit code', () => {
+    const output = buildCheckOutput(buildResult({ isSuccess: false, exitCode: 0, annotations: [buildAnnotation('failure')] }));
+    expect(output.title).toBe('Failed in 12s');
+    expect(output.summary).toBe('1 failure(s)');
+  });
+
   it('keeps the end of a long log', () => {
     const output = buildCheckOutput(buildResult({ log: `${'x'.repeat(70000)}the end` }));
     expect(output.text.startsWith('Log (last part):')).toBe(true);
@@ -39,5 +45,13 @@ describe('buildCheckOutput', () => {
 
   it('cannot be broken out of its code block by the log', () => {
     expect(buildCheckOutput(buildResult({ log: 'a ``` b' })).text).not.toContain('a ``` b');
+  });
+});
+
+describe('hasFailureAnnotations', () => {
+  it('is true only when an annotation is a failure', () => {
+    expect(hasFailureAnnotations([])).toBe(false);
+    expect(hasFailureAnnotations([buildAnnotation('warning'), buildAnnotation('notice')])).toBe(false);
+    expect(hasFailureAnnotations([buildAnnotation('notice'), buildAnnotation('failure')])).toBe(true);
   });
 });

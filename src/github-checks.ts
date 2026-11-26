@@ -29,6 +29,9 @@ const getErrorStatus = (error: unknown): number | undefined => {
   return typeof error === 'object' && error !== null && 'status' in error ? Number(error.status) : undefined;
 };
 
+// NOTE(krishan711): checkers that write annotations (like kiba-build's) exit with 0 and report what they found as failure annotations
+export const hasFailureAnnotations = (annotations: IAnnotation[]): boolean => annotations.some((annotation: IAnnotation): boolean => annotation.annotation_level === ANNOTATION_LEVEL_FAILURE);
+
 export const buildCheckOutput = (result: ICheckResult): { title: string; summary: string; text: string } => {
   const countAnnotations = (level: string): number => result.annotations.filter((annotation: IAnnotation): boolean => annotation.annotation_level === level).length;
   const annotationCounts = [
@@ -36,7 +39,7 @@ export const buildCheckOutput = (result: ICheckResult): { title: string; summary
     [countAnnotations(ANNOTATION_LEVEL_WARNING), 'warning(s)'],
     [countAnnotations(ANNOTATION_LEVEL_NOTICE), 'notice(s)'],
   ].filter(([count]): boolean => Number(count) > 0).map(([count, label]): string => `${count} ${label}`);
-  const outcome = result.isSuccess ? 'Passed' : `Failed${result.exitCode !== null ? ` (exit code ${result.exitCode})` : ''}`;
+  const outcome = result.isSuccess ? 'Passed' : `Failed${result.exitCode !== null && result.exitCode !== 0 ? ` (exit code ${result.exitCode})` : ''}`;
   const isLogTruncated = result.log.length > MAX_LOG_LENGTH;
   const logTail = isLogTruncated ? result.log.slice(-MAX_LOG_LENGTH) : result.log;
   return {

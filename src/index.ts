@@ -8,7 +8,7 @@ import { getOctokit, context as githubContext } from '@actions/github';
 
 import { parseCheckDefinitions } from './check-definitions';
 import { copyFromContainer, getImageWorkingDirectory, removeContainer, startContainer, waitForContainer, writeContainerLogs } from './docker';
-import { ChecksPermissionError, completeCheck, createInProgressCheck, ICheckTarget, Octokit } from './github-checks';
+import { ChecksPermissionError, completeCheck, createInProgressCheck, hasFailureAnnotations, ICheckTarget, Octokit } from './github-checks';
 import { IAnnotation, ICheckDefinition, ICheckResult, SKIP_ENVIRONMENT_VARIABLE } from './model';
 
 const UNFINISHED_CHECK_RUN_IDS_STATE = 'unfinishedCheckRunIds';
@@ -70,7 +70,7 @@ const runCheck = async (containerName: string, definition: ICheckDefinition, ima
   const log = await fs.readFile(logPath, 'utf8').catch((): string => '');
   return {
     definition,
-    isSuccess: exitCode === 0 && !errorMessage,
+    isSuccess: exitCode === 0 && !errorMessage && !hasFailureAnnotations(annotations),
     exitCode,
     durationSeconds: Math.round((Date.now() - startTime) / 1000),
     log: errorMessage ? `${log}\n${errorMessage}` : log,
